@@ -10,3 +10,10 @@ snowflake:
     schema: "SCHEMANAME"
     account: "abcdefg-hi12345"
     password: "myotherpassword"
+
+postgres:
+    username: "username"
+    host: "localhost"
+    password: "jlsjrl0rdg0je4"
+    database: "dbname"
+    port: 5432
