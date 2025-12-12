@@ -169,46 +169,39 @@ class PostgresConnection(DatabaseConnection):
     def replace_data(self, data: pd.DataFrame, schema: str, table: str):
         """Replace table data using PostgreSQL COPY command for optimal performance"""
         from io import StringIO
+        import pandas as pd
         
-        temp_table_name = f"{table}_temp"
+        # Clean up data: convert float columns that should be integers
+        # (e.g., 1988.0 -> 1988) to avoid PostgreSQL type errors
+        data = data.copy()
+        for col in data.columns:
+            if pd.api.types.is_float_dtype(data[col]):
+                # Check if all non-null values are whole numbers
+                non_null = data[col].dropna()
+                if len(non_null) > 0 and (non_null % 1 == 0).all():
+                    # Convert to Int64 (nullable integer type)
+                    data[col] = data[col].astype('Int64')
+        
         with self.connect() as conn:
             with conn.cursor() as cur:
                 try:
-                    # Create temp table
-                    cur.execute(self.pg_mod_sql.SQL("DROP TABLE IF EXISTS {temp}").format(
-                        temp=self.pg_mod_sql.Identifier(temp_table_name)))
-                    cur.execute(
-                        self.pg_mod_sql.SQL("CREATE TEMP TABLE {temp} (LIKE {schema}.{table} INCLUDING ALL)").format(
-                            temp=self.pg_mod_sql.Identifier(temp_table_name), 
-                            schema=self.pg_mod_sql.Identifier(schema),
-                            table=self.pg_mod_sql.Identifier(table)))
+                    cur.execute(self.pg_mod_sql.SQL("TRUNCATE TABLE {schema}.{table}").format(
+                        schema=self.pg_mod_sql.Identifier(schema), 
+                        table=self.pg_mod_sql.Identifier(table)))
                     
-                    # Use COPY to load data into temp table (much faster than INSERT)
+                    # COPY directly to the main table
                     buffer = StringIO()
                     data.to_csv(buffer, index=False, header=False, na_rep='\\N')
                     buffer.seek(0)
                     
                     columns = self.pg_mod_sql.SQL(', ').join(
                         self.pg_mod_sql.Identifier(c) for c in data.columns)
-                    copy_sql = self.pg_mod_sql.SQL("COPY {temp} ({cols}) FROM STDIN WITH CSV NULL '\\N'").format(
-                        temp=self.pg_mod_sql.Identifier(temp_table_name),
+                    copy_sql = self.pg_mod_sql.SQL("COPY {schema}.{table} ({cols}) FROM STDIN WITH CSV NULL '\\N'").format(
+                        schema=self.pg_mod_sql.Identifier(schema),
+                        table=self.pg_mod_sql.Identifier(table),
                         cols=columns)
                     
                     cur.copy_expert(copy_sql, buffer)
-                    
-                    # Replace data in target table
-                    cur.execute(self.pg_mod_sql.SQL("DELETE FROM {schema}.{table}").format(
-                        schema=self.pg_mod_sql.Identifier(schema), 
-                        table=self.pg_mod_sql.Identifier(table)))
-                    cur.execute(
-                        self.pg_mod_sql.SQL("INSERT INTO {schema}.{table} ({cols}) SELECT {cols} FROM {temp}").format(
-                            schema=self.pg_mod_sql.Identifier(schema), 
-                            table=self.pg_mod_sql.Identifier(table),
-                            cols=columns, 
-                            temp=self.pg_mod_sql.Identifier(temp_table_name)))
-                    
-                    cur.execute(self.pg_mod_sql.SQL("DROP TABLE IF EXISTS {temp}").format(
-                        temp=self.pg_mod_sql.Identifier(temp_table_name)))
                     conn.commit()
                 except self.pg_mod.DatabaseError as e:
                     conn.rollback()
