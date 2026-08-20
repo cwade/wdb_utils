@@ -1,5 +1,7 @@
 import abc
 import getpass
+import os
+import re
 from contextlib import contextmanager
 import pandas as pd
 from importlib import import_module
@@ -16,6 +18,37 @@ class DatabaseConnection(abc.ABC):
     def _create_connection(self):
         """Creates a database-specific connection object."""
         pass
+
+    def _resolve_password(self):
+        """Resolve the database password without requiring it in the config file.
+
+        Lookup order:
+          1. 'password' in the config file section (backwards compatible)
+          2. system keyring (macOS Keychain / Windows Credential Locker):
+             service 'wdb_utils', account '<db_key>:<username>'
+             e.g. keyring.set_password('wdb_utils', 'postgres:ir_dbt_admin', ...)
+          3. env var WDB_<DBKEY>_PASSWORD__<USERNAME> (non-alphanumerics -> _,
+             uppercased), for hosts with several accounts on one db_key
+          4. env var WDB_<DBKEY>_PASSWORD
+          5. interactive prompt - last resort; hangs headless/cron runs, so
+             servers should set the env vars (e.g. in a chmod-600 env file)
+        """
+        password = self.db_config.get('password')
+        username = str(self.db_config.get('username', ''))
+        if password is None:
+            try:
+                import keyring
+                password = keyring.get_password('wdb_utils', f'{self.db_key}:{username}')
+            except Exception:
+                password = None
+        if password is None:
+            key = re.sub(r'[^A-Za-z0-9]+', '_', username).strip('_').upper()
+            password = os.environ.get(f'WDB_{self.db_key.upper()}_PASSWORD__{key}')
+        if password is None:
+            password = os.environ.get(f'WDB_{self.db_key.upper()}_PASSWORD')
+        if password is None:
+            password = getpass.getpass('Database password: ')
+        return password
 
     @contextmanager
     def connect(self):
@@ -77,7 +110,7 @@ class OracleConnection(DatabaseConnection):
             self.oracledb.init_oracle_client()
 
     def _create_connection(self):
-        pwd = self.db_config.get('password') or getpass.getpass('Database password: ')
+        pwd = self._resolve_password()
         return self.oracledb.connect(
             user=self.db_config['username'],
             password=pwd,
@@ -106,7 +139,7 @@ class SnowflakeConnection(DatabaseConnection):
         self.snow_connect.paramstyle = 'numeric'
 
     def _create_connection(self):
-        pwd = self.db_config.get('password') or getpass.getpass('Database password: ')
+        pwd = self._resolve_password()
         return self.snow_connect.connect(
             user=self.db_config['username'],
             password=pwd,
@@ -132,7 +165,7 @@ class PostgresConnection(DatabaseConnection):
         self.pg_mod_sql = import_module('psycopg2.sql')
 
     def _create_connection(self):
-        pwd = self.db_config.get('password') or getpass.getpass('Database password: ')
+        pwd = self._resolve_password()
         conn = self.pg_mod.connect(
             user=self.db_config['username'],
             password=pwd,
@@ -186,8 +219,8 @@ class PostgresConnection(DatabaseConnection):
             with conn.cursor() as cur:
                 try:
                     cur.execute(self.pg_mod_sql.SQL("TRUNCATE TABLE {schema}.{table}").format(
-                        schema=self.pg_mod_sql.Identifier(schema), 
-                        table=self.pg_mod_sql.Identifier(table)))
+                            schema=self.pg_mod_sql.Identifier(schema),
+                            table=self.pg_mod_sql.Identifier(table)))
                     
                     # COPY directly to the main table
                     buffer = StringIO()

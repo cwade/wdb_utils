@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wdb_utils"
-version = "3.7.4"
+version = "3.8.0"
 description = "Utilities for querying and loading data into an Oracle, Snowflake, or Postgres database."
 readme = "README.md"
 requires-python = ">=3.7"
