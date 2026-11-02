@@ -7,7 +7,7 @@ name = "wdb_utils"
 version = "3.8.1"
 description = "Utilities for querying and loading data into an Oracle, Snowflake, or Postgres database."
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.9"
 authors = [
     {name = "Courtney Wade"}
 ]
