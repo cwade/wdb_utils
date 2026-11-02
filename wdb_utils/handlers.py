@@ -93,7 +93,7 @@ def load_data_postgres(data, schema, tablename, config=None):
 
 
 def replace_data_postgres(data, schema, tablename, config=None):
-    """Replace data using PostgreSQL COPY command for optimal performance"""
+    """Replace a table's data (TRUNCATE + COPY) and ANALYZE it, in one transaction"""
     handler = get_db_handler('postgres', config)
     handler.replace_data(data, schema, tablename)
 

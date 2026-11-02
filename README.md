@@ -36,6 +36,10 @@ db.run_command_postgres('delete from third_table')
 db.load_data_oracle(df, 'my_schema', 'my_table')
 db.load_data_snowflake(df, 'another_schema', 'other_table')
 db.load_data_postgres(df, 'third_schema', 'third_table')
+
+# Replace a Postgres table's contents in one transaction: TRUNCATE, COPY the
+# data frame in, then ANALYZE so the planner has fresh statistics right away
+db.replace_data_postgres(df, 'third_schema', 'third_table')
 ```
 
 ### Backward compatibility

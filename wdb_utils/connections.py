@@ -200,7 +200,7 @@ class PostgresConnection(DatabaseConnection):
                     raise RuntimeError(f"Postgres data load failed: {e}") from e
 
     def replace_data(self, data: pd.DataFrame, schema: str, table: str):
-        """Replace table data using PostgreSQL COPY command for optimal performance"""
+        """Replace table data (TRUNCATE + COPY) and refresh its planner statistics (ANALYZE), in one transaction"""
         from io import StringIO
         import pandas as pd
         
@@ -235,6 +235,16 @@ class PostgresConnection(DatabaseConnection):
                         cols=columns)
                     
                     cur.copy_expert(copy_sql, buffer)
+
+                    # Refresh the planner statistics before anyone queries the new
+                    # contents. After a TRUNCATE + COPY the table keeps its old
+                    # statistics (or has none) until autovacuum gets to it, which
+                    # can be minutes; a query planned in that window can pick a
+                    # catastrophic plan. ANALYZE samples a fixed number of rows,
+                    # so it is cheap even for large tables.
+                    cur.execute(self.pg_mod_sql.SQL("ANALYZE {schema}.{table}").format(
+                        schema=self.pg_mod_sql.Identifier(schema),
+                        table=self.pg_mod_sql.Identifier(table)))
                     conn.commit()
                 except self.pg_mod.DatabaseError as e:
                     conn.rollback()
